@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>熱機関シミュレーション（連続再生・ラチェット保持）</title>
+<style>
+  :root{
+    --ink:#111; --muted:#666; --accent:#0a7cff; --ok:#10a37f;
+    --q1:#d33; --q2:#09f; --w:#0a7;
+  }
+  html,body{background:#fff;color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Hiragino Sans","Noto Sans JP",sans-serif;margin:0}
+  header{padding:14px 18px;border-bottom:1px solid #eee}
+  header h1{font-size:20px;margin:0 0 6px}
+  header p{margin:0;color:#444;font-size:13px}
+  main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:16px}
+  .panel{border:1px solid #eee;border-radius:12px;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+  .panel h2{font-size:16px;margin:0;padding:10px 12px;border-bottom:1px solid #f3f3f3}
+  .panel .body{padding:12px}
+  .row{display:flex;gap:10px;align-items:center;margin:10px 0;flex-wrap:wrap}
+  label{font-size:13px;color:#333;min-width:110px}
+  input[type="range"]{width:100%}
+  input[type="number"]{width:120px;padding:6px;border:1px solid #ddd;border-radius:8px}
+  .btn{appearance:none;border:1px solid #ddd;background:#fafafa;padding:8px 12px;border-radius:10px;cursor:pointer;font-weight:600}
+  .btn.primary{border-color:var(--accent);background:var(--accent);color:#fff}
+  .btn.ok{border-color:var(--ok);background:var(--ok);color:#fff}
+  .pill{display:inline-block;padding:2px 8px;border-radius:999px;border:1px solid #eee;background:#fafafa;font-size:12px}
+  .small{font-size:12px;line-height:1.6;color:#444}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  canvas{background:#fff;border:1px solid #eee;border-radius:10px}
+  .legend{font-size:12px;color:#333;display:flex;gap:10px;flex-wrap:wrap}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .dot{display:inline-block;width:10px;height:10px;border-radius:50%}
+  .dot.q1{background:var(--q1)} .dot.q2{background:var(--q2)} .dot.w{background:var(--w)}
+</style>
+</head>
+<body>
+<header>
+  <h1>熱機関（Q₁→W→Q₂）：ラチェット保持と体積変化</h1>
+  <p>Q₁（吸熱）で体積↑・ラチェットが前進して仕事W、Q₂（放熱）で体積↓・ピストンは戻るがラチェットは逆転しない。</p>
+</header>
+
+<main>
+  <!-- 左：操作パネル -->
+  <section class="panel">
+    <h2>操作パネル</h2>
+    <div class="body">
+      <div class="row">
+        <label>計算する量</label>
+        <label><input type="radio" name="solve" value="W" checked> W（仕事）</label>
+        <label><input type="radio" name="solve" value="Q2"> Q₂（放出熱）</label>
+        <label><input type="radio" name="solve" value="Q1"> Q₁（吸熱）</label>
+      </div>
+
+      <div class="row">
+        <label for="q1Range">Q₁：加えた熱量</label>
+        <input id="q1Range" type="range" min="0" max="2500" step="10" value="1000">
+        <input id="q1Num"   type="number" min="0" max="2500" step="10" value="1000">
+        <span class="pill">J / サイクル</span>
+      </div>
+      <div class="row">
+        <label for="q2Range">Q₂：放出した熱量</label>
+        <input id="q2Range" type="range" min="0" max="2500" step="10" value="400">
+        <input id="q2Num"   type="number" min="0" max="2500" step="10" value="400">
+        <span class="pill">J / サイクル</span>
+      </div>
+      <div class="row">
+        <label for="wRange">W：外部にした仕事</label>
+        <input id="wRange" type="range" min="0" max="2500" step="10" value="600">
+        <input id="wNum"   type="number" min="0" max="2500" step="10" value="600">
+        <span class="pill">J / サイクル</span>
+      </div>
+
+      <div class="row" style="gap:8px;align-items:center">
+        <button id="runBtn" class="btn primary">▶ 再生</button>
+        <button id="resetBtn" class="btn">↺ リセット</button>
+        <button id="markBtn" class="btn ok">● e–Wに記録</button>
+        <label style="display:inline-flex;align-items:center;gap:6px;margin-left:8px">
+          <input id="loopChk" type="checkbox"> 連続再生
+        </label>
+        <span class="pill">サイクル時間：4.0 s（Q₁ 2 s → Q₂ 2 s）</span>
+      </div>
+
+      <div class="row" style="justify-content:space-between">
+        <div class="small">
+          <div><b>e（効率）＝</b><span id="etaText">0.60</span></div>
+          <div><b>W＝</b><span id="wText">600</span> J / サイクル</div>
+          <div><b>Q₁＝</b><span id="q1Text">1000</span> J / サイクル</div>
+          <div><b>Q₂＝</b><span id="q2Text">400</span> J / サイクル</div>
+        </div>
+        <div class="legend">
+          <span><i class="dot q1"></i>Q₁</span>
+          <span><i class="dot q2"></i>Q₂</span>
+          <span><i class="dot w"></i>W</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 右：アニメ＋グラフ -->
+  <section class="panel">
+    <h2>図と同期グラフ</h2>
+    <div class="body">
+      <canvas id="simCanvas" width="760" height="320"></canvas>
+      <div class="grid" style="margin-top:12px">
+        <div>
+          <h3 class="small" style="margin:8px 0 6px">エネルギー棒グラフ（J）</h3>
+          <canvas id="barCanvas" width="360" height="220"></canvas>
+        </div>
+        <div>
+          <h3 class="small" style="margin:8px 0 6px">e–W（効率–仕事）</h3>
+          <canvas id="ewCanvas" width="360" height="220"></canvas>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+// ---------- DOM ----------
+const q1Range = document.getElementById('q1Range');
+const q1Num   = document.getElementById('q1Num');
+const q2Range = document.getElementById('q2Range');
+const q2Num   = document.getElementById('q2Num');
+const wRange  = document.getElementById('wRange');
+const wNum    = document.getElementById('wNum');
+
+const etaText = document.getElementById('etaText');
+const wText   = document.getElementById('wText');
+const q1Text  = document.getElementById('q1Text');
+const q2Text  = document.getElementById('q2Text');
+
+const runBtn  = document.getElementById('runBtn');
+const resetBtn= document.getElementById('resetBtn');
+const markBtn = document.getElementById('markBtn');
+const loopChk = document.getElementById('loopChk');
+
+const simCanvas = document.getElementById('simCanvas');
+const barCanvas = document.getElementById('barCanvas');
+const ewCanvas  = document.getElementById('ewCanvas');
+const simCtx = simCanvas.getContext('2d');
+const barCtx = barCanvas.getContext('2d');
+const ewCtx  = ewCanvas.getContext('2d');
+
+// ---------- 状態 ----------
+const state = {
+  Q1: 1000, // [J]
+  Q2:  400, // [J]
+  W:   600, // [J]  （整合：W=Q1−Q2）
+  solve: 'W', // 'W' | 'Q2' | 'Q1'
+
+  // アニメ制御
+  running:false, t:0, last:null,
+  heatT:2.0, coolT:2.0, // [s]
+  currentWAnim:0,       // 進行中のW（0→W）
+  gearAngle:0,          // ラチェットの累積角度（保持）
+  heatBlink:0           // 矢印点滅用
+};
+
+// e–W の記録点
+const recorded = []; // {W,e}
+
+// ---------- 入力の双方向同期 ----------
+function clamp(v,a,b){ return Math.min(b, Math.max(a,v)); }
+function syncFromState(){
+  // 自動計算（どれを解くか）
+  if (state.solve==='W'){
+    state.W = clamp(state.Q1 - state.Q2, 0, 2500);
+  } else if (state.solve==='Q2'){
+    state.Q2 = clamp(state.Q1 - state.W, 0, 2500);
+  } else { // 'Q1'
+    state.Q1 = clamp(state.W + state.Q2, 0, 2500);
+  }
+
+  // 表示に反映
+  q1Range.value = q1Num.value = state.Q1;
+  q2Range.value = q2Num.value = state.Q2;
+  wRange.value  = wNum.value  = state.W;
+
+  const e = state.Q1>0 ? (state.W/state.Q1) : 0;
+  etaText.textContent = isFinite(e) ? e.toFixed(3) : '—';
+  wText.textContent   = state.W.toFixed(0);
+  q1Text.textContent  = state.Q1.toFixed(0);
+  q2Text.textContent  = state.Q2.toFixed(0);
+
+  // 図とグラフ更新（停止中は初期フレーム）
+  drawSim(getPistonLift(0,0), state.gearAngle, false, false);
+  drawBars(state.Q1, state.Q2, state.W, 0);
+  drawEW(state.W, e, 0, 0);
+}
+
+// 入力イベント
+[q1Range,q1Num].forEach(el=>el.addEventListener('input', ()=>{ state.Q1=+el.value; syncFromState(); }));
+[q2Range,q2Num].forEach(el=>el.addEventListener('input', ()=>{ state.Q2=+el.value; syncFromState(); }));
+[wRange, wNum ].forEach(el=>el.addEventListener('input', ()=>{ state.W =+el.value; syncFromState(); }));
+document.querySelectorAll('input[name="solve"]').forEach(r=>{
+  r.addEventListener('change', ()=>{ state.solve = r.value; syncFromState(); });
+});
+
+// ボタン
+runBtn.addEventListener('click', ()=>{
+  state.running = !state.running;
+  if (state.running){ runBtn.textContent='■ 停止'; requestAnimationFrame(tick); }
+  else { runBtn.textContent='▶ 再生'; }
+});
+resetBtn.addEventListener('click', ()=>{
+  state.running=false; runBtn.textContent='▶ 再生';
+  state.t=0; state.last=null; state.currentWAnim=0; state.gearAngle=0;
+  syncFromState();
+});
+markBtn.addEventListener('click', ()=>{
+  const e = state.Q1>0 ? (state.W/state.Q1) : 0;
+  recorded.push({W:state.W, e:Math.max(0,Math.min(1,e))});
+  drawEW(state.W, e, state.currentWAnim, (state.Q1>0?state.currentWAnim/state.Q1:0));
+});
+
+// ---------- アニメ ----------
+function tick(ts){
+  if (!state.running) return;
+  if (state.last==null) state.last = ts;
+  const dt = Math.min(0.033, (ts - state.last)/1000);
+  state.last = ts;
+  state.t += dt; state.heatBlink += dt;
+
+  const totalT = state.heatT + state.coolT;
+  const inHeat = state.t <= state.heatT;               // Q₁フェーズ
+  const inCool = state.t > state.heatT && state.t <= totalT; // Q₂フェーズ
+
+  // W(t) 進行（Q₁の間に 0→W）
+  let Wcur = state.W;
+  let gearAngleNow = state.gearAngle;
+  if (inHeat){
+    const p = state.t/state.heatT; // 0..1
+    Wcur = state.W * p;
+    gearAngleNow = state.gearAngle + WtoAngle(state.W) * p;
+  } else {
+    Wcur = state.W;
+    gearAngleNow = state.gearAngle + WtoAngle(state.W);
+  }
+  state.currentWAnim = Wcur;
+
+  // ピストンリフト（体積変化）
+  const heatProg = inHeat ? (state.t/state.heatT) : (inCool ? 1-(state.t-state.heatT)/state.coolT : 0);
+  const lift = getPistonLift(heatProg, state.W);
+
+  drawSim(lift, gearAngleNow, inHeat, inCool);
+  const ecur = (state.Q1>0) ? (Wcur/state.Q1) : 0;
+  drawBars(state.Q1, state.Q2, state.W, Wcur);
+  drawEW(state.W, (state.Q1>0?state.W/state.Q1:0), Wcur, ecur);
+
+  if (state.t >= totalT){
+    // サイクル完了：ラチェット角を保持
+    state.gearAngle += WtoAngle(state.W);
+    if (loopChk.checked){
+      // 連続再生：時間をリセットして続行
+      state.t = 0;
+      state.last = ts;
+      requestAnimationFrame(tick);
+    } else {
+      // 1サイクルのみ：停止
+      state.running=false; runBtn.textContent='▶ 再生';
+    }
+  } else {
+    requestAnimationFrame(tick);
+  }
+}
+
+// W[J] を歯車角度[rad]に写像（可視化用スケール）
+function WtoAngle(W){ const turns = (W/2000)*2.0; return turns*Math.PI*2; }
+// ピストンの持ち上がり量（px）
+function getPistonLift(heatProg, W){
+  const base = 16;                // 最低の上昇幅
+  const extra = Math.min(84, W*0.04); // W=2000で+80px程度
+  return (base + extra) * heatProg;
+}
+
+// ---------- 描画：図（ピストン＋気体＋ラチェット＋ラベル） ----------
+function drawSim(lift, gearAngleNow, showHeat, showCool){
+  const ctx = simCtx, W = simCanvas.width, H = simCanvas.height;
+  ctx.clearRect(0,0,W,H);
+
+  // ガイド（薄いグリッド）
+  ctx.save(); ctx.strokeStyle='#f6f6f6';
+  for(let x=40;x<W;x+=40){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); }
+  for(let y=40;y<H;y+=40){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
+  ctx.restore();
+
+  // シリンダ
+  const cylX=80, cylY=60, cylW=200, cylH=180, pTh=8;
+  ctx.fillStyle='#fff'; ctx.strokeStyle='#999'; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.rect(cylX,cylY,cylW,cylH); ctx.fill(); ctx.stroke();
+
+  // ピストン位置：下端から持ち上げ
+  const pistonBaseY = cylY + cylH - 40;    // 下限
+  const pistonY = pistonBaseY - lift;      // 上昇
+  ctx.fillStyle='#bbb'; ctx.fillRect(cylX, pistonY, cylW, pTh);
+
+  // 気体（黄色）— 体積＝気体高さに対応
+  const gasH = (cylY + cylH) - (pistonY + pTh);
+  ctx.fillStyle='rgba(250,220,150,0.65)';
+  ctx.fillRect(cylX, pistonY+pTh, cylW, gasH);
+
+  // Q₁（赤矢印とラベル）
+  if (showHeat){
+    const a = 0.5 + 0.5*Math.sin(state.heatBlink*6.28);
+    ctx.save(); ctx.globalAlpha = 0.6*a + 0.2;
+    drawArrow(ctx, cylX + cylW/2, cylY + cylH + 14, cylX + cylW/2, cylY + cylH - 28, getCss('--q1'), 6);
+    ctx.restore();
+    ctx.fillStyle = getCss('--q1'); ctx.font='16px system-ui';
+    ctx.fillText('Q₁', cylX + cylW/2 + 10, cylY + cylH - 6);
+  }
+
+  // Q₂（青矢印とラベル）
+  if (showCool){
+    const a = 0.5 + 0.5*Math.sin(state.heatBlink*6.28);
+    ctx.save(); ctx.globalAlpha = 0.6*a + 0.2;
+    drawArrow(ctx, cylX + cylW + 26, cylY + 24, cylX + cylW + 26, cylY + 64, getCss('--q2'), 6);
+    ctx.restore();
+    ctx.fillStyle = getCss('--q2'); ctx.font='16px system-ui';
+    ctx.fillText('Q₂', cylX + cylW + 36, cylY + 50);
+  }
+
+  // ピストン連結のラック（押し棒）
+  const rackY = pistonY - 10;
+  ctx.strokeStyle='#444'; ctx.lineWidth=3;
+  ctx.beginPath(); ctx.moveTo(cylX + cylW + 10, rackY);
+  ctx.lineTo(520 - 40 - 20, rackY); ctx.stroke();
+  ctx.fillStyle='#444'; ctx.beginPath();
+  ctx.arc(520 - 40 - 20, rackY, 3, 0, Math.PI*2); ctx.fill();
+
+  // 右：ラチェット歯車＋爪（逆転防止）
+  const gearX=520, gearY=160, gearR=40;
+  drawRatchet(simCtx, gearX, gearY, gearR, gearAngleNow);
+
+  // W ラベル（歯車の横）
+  simCtx.fillStyle = getCss('--w'); simCtx.font='18px system-ui';
+  simCtx.fillText('W', gearX + gearR + 18, gearY + 6);
+
+  // 注記
+  ctx.fillStyle='#333'; ctx.font='13px system-ui';
+  ctx.fillText('Q₁：体積↑・ラチェット前進 → W 発生', 60, H-40);
+  ctx.fillText('Q₂：体積↓・本体は戻る（ラチェット保持）', 60, H-20);
+}
+
+// 歯車（簡易ラチェット形状）
+function drawRatchet(ctx, cx, cy, r, ang){
+  const teeth=12;
+  ctx.save(); ctx.translate(cx,cy); ctx.rotate(ang);
+  ctx.fillStyle='#777'; ctx.strokeStyle='#666'; ctx.lineWidth=2;
+  ctx.beginPath();
+  for(let i=0;i<teeth;i++){
+    const a1 = (i/teeth)*Math.PI*2;
+    const a2 = ((i+0.5)/teeth)*Math.PI*2;
+    const a3 = ((i+1)/teeth)*Math.PI*2;
+    const r1=r, r2=r+6, r3=r;
+    if(i===0) ctx.moveTo(r1*Math.cos(a1), r1*Math.sin(a1));
+    ctx.lineTo(r2*Math.cos(a1), r2*Math.sin(a1));
+    ctx.lineTo(r2*Math.cos(a2), r2*Math.sin(a2));
+    ctx.lineTo(r3*Math.cos(a3), r3*Math.sin(a3));
+  }
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+  // ハブ
+  ctx.fillStyle='#999'; ctx.beginPath(); ctx.arc(0,0,8,0,Math.PI*2); ctx.fill(); ctx.stroke();
+  ctx.restore();
+
+  // 爪（固定）
+  ctx.fillStyle='#333';
+  const pawlX=cx + r + 12, pawlY=cy - 6;
+  ctx.beginPath(); ctx.moveTo(pawlX, pawlY);
+  ctx.lineTo(pawlX+16, pawlY+6);
+  ctx.lineTo(pawlX, pawlY+12);
+  ctx.closePath(); ctx.fill();
+  ctx.fillRect(pawlX-2, pawlY-2, 4, 16);
+}
+
+// 矢印（x1,y1 → x2,y2）
+function drawArrow(ctx, x1,y1, x2,y2, color='#000', w=4){
+  const dx=x2-x1, dy=y2-y1, a=Math.atan2(dy,dx), L=Math.hypot(dx,dy);
+  ctx.save(); ctx.translate(x1,y1); ctx.rotate(a);
+  ctx.strokeStyle=color; ctx.fillStyle=color; ctx.lineWidth=w/2;
+  ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(L-10,0); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(L-10,-6); ctx.lineTo(L,0); ctx.lineTo(L-10,6); ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+function getCss(varName){ return getComputedStyle(document.documentElement).getPropertyValue(varName).trim(); }
+
+// ---------- 棒グラフ（Q1,Q2,W と進行W） ----------
+function drawBars(Q1,Q2,W, Wcur){
+  const ctx = barCtx, w=barCanvas.width, h=barCanvas.height;
+  ctx.clearRect(0,0,w,h);
+  const left=40, right=w-10, bottom=h-28, top=14;
+
+  const maxVal = Math.max(200, Math.ceil(Math.max(Q1,Q2,W)/200)*200);
+  // 軸
+  ctx.strokeStyle='#ddd'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(left,top); ctx.lineTo(left,bottom); ctx.lineTo(right,bottom); ctx.stroke();
+
+  // グリッド
+  ctx.fillStyle='#666'; ctx.font='11px system-ui';
+  ctx.textAlign='right';
+  for(let i=0;i<=5;i++){
+    const v = maxVal*i/5;
+    const y = bottom - (bottom-top)*(v/maxVal);
+    ctx.fillText(v.toFixed(0), left-6, y+3);
+    ctx.strokeStyle='#f2f2f2';
+    ctx.beginPath(); ctx.moveTo(left,y); ctx.lineTo(right,y); ctx.stroke();
+  }
+
+  // 棒
+  const bars = [
+    {label:'Q₁', val:Q1, color:getCss('--q1')},
+    {label:'Q₂', val:Q2, color:getCss('--q2')},
+    {label:'W',  val:W,  color:getCss('--w')}
+  ];
+  const bw=44, gap=28, x0=left+28;
+  bars.forEach((b,i)=>{
+    const x = x0 + i*(bw+gap);
+    const hbar = (bottom-top)*(b.val/maxVal);
+    ctx.fillStyle = b.color;
+    ctx.fillRect(x, bottom-hbar, bw, hbar);
+    ctx.fillStyle='#333'; ctx.textAlign='center';
+    ctx.fillText(b.label, x+bw/2, bottom+14);
+  });
+
+  // 進行 W
+  if (Wcur!=null){
+    const i=2;
+    const x = x0 + i*(bw+gap);
+    const hbar = (bottom-top)*(Math.min(Wcur,maxVal)/maxVal);
+    ctx.fillStyle = 'rgba(16,163,127,0.35)';
+    ctx.fillRect(x, bottom-hbar, bw, hbar);
+    ctx.fillStyle = getCss('--w'); ctx.font='11px system-ui';
+    ctx.fillText(`W(t)=${Wcur.toFixed(0)} J`, x+bw/2, bottom-hbar-6);
+  }
+}
+
+// ---------- e–W グラフ ----------
+function drawEW(W, e, Wcur, ecur){
+  const ctx = ewCtx, w=ewCanvas.width, h=ewCanvas.height;
+  ctx.clearRect(0,0,w,h);
+  const left=40, right=w-10, bottom=h-28, top=12;
+  const maxW = Math.max(200, Math.ceil(Math.max(W, ...recorded.map(p=>p.W), 1000)/200)*200);
+  const maxE = 1.0;
+
+  // 軸
+  ctx.strokeStyle='#ddd'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(left,top); ctx.lineTo(left,bottom); ctx.lineTo(right,bottom); ctx.stroke();
+
+  // グリッド・目盛
+  ctx.fillStyle='#666'; ctx.font='11px system-ui';
+  ctx.textAlign='center';
+  for(let i=0;i<=4;i++){
+    const wx = maxW*i/4; const x = left + (right-left)*i/4;
+    ctx.fillText(wx.toFixed(0), x, bottom+14);
+    ctx.strokeStyle='#f4f4f4';
+    ctx.beginPath(); ctx.moveTo(x,top); ctx.lineTo(x,bottom); ctx.stroke();
+  }
+  ctx.textAlign='right';
+  for(let j=0;j<=5;j++){
+    const ey = maxE*j/5; const y = bottom - (bottom-top)*(ey/maxE);
+    ctx.fillText(ey.toFixed(2), left-6, y+3);
+    ctx.strokeStyle='#f4f4f4';
+    ctx.beginPath(); ctx.moveTo(left,y); ctx.lineTo(right,y); ctx.stroke();
+  }
+
+  // 記録点
+  recorded.forEach(p=>{
+    const x = left + (right-left)*(p.W/maxW);
+    const y = bottom - (bottom-top)*(p.e/maxE);
+    ctx.fillStyle='#bbb'; ctx.beginPath(); ctx.arc(x,y,3,0,Math.PI*2); ctx.fill();
+  });
+
+  // 進行点
+  const xcur = left + (right-left)*((Wcur||0)/maxW);
+  const ycur = bottom - (bottom-top)*((ecur||0)/maxE);
+  ctx.fillStyle=getCss('--w'); ctx.beginPath(); ctx.arc(xcur,ycur,4,0,Math.PI*2); ctx.fill();
+
+  // 最終点
+  const xf = left + (right-left)*(W/maxW);
+  const yf = bottom - (bottom-top)*(e/maxE);
+  ctx.fillStyle='#111'; ctx.beginPath(); ctx.arc(xf,yf,4.5,0,Math.PI*2); ctx.fill();
+
+  ctx.fillStyle='#333'; ctx.textAlign='left';
+  ctx.fillText('横軸：W [J]　縦軸：e = W / Q₁', left, top+10);
+}
+
+// ---------- 初期化 ----------
+syncFromState();
+
+</script>
+</body>
+</html>
